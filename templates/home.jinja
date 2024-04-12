@@ -1,0 +1,344 @@
+<!-- 
+    Here you'll find the main exhibit: the chat application code. Feel free to look around!
+-->
+{% extends 'base.jinja' %}
+
+
+{% block content %} 
+   <style>
+    nav {
+        border-bottom: 1px solid black;
+        overflow: auto
+    }
+
+    #message_box {
+        border: 1px solid black; 
+        height: 400px; 
+        width: 800px; 
+        overflow: auto;
+        padding: 2px;
+    }
+
+    .text  {
+        margin-top: 2px;
+        margin-bottom: 2px;
+    }
+    #friend_list
+    .list-item{
+        margin-top: 25px;
+        margin-bottom: 25px;
+    }
+
+    .list-item p {
+        display: inline-block;
+    }
+
+    .passed_p, .not_passed_p, .accepted_button, .accept_button, .chat_button{
+        margin-left: 20px;
+    }
+
+</style>
+
+<!--Navbar, you'll see the username here-->
+<nav style="border-bottom: 1px solid black;">
+    <ol style="float: right">
+        <li style="display:inline-block">Username:  {{ username }} </li>
+    </ol>
+    <button onclick="logout()">logout</button>
+</nav>
+
+<h1>Messaging App </h1>
+
+<main id="main">
+    <!-- The messages are displayed here -->
+    <section id="message_box"></section>
+    <section id="input_box" style="display: none" >
+
+    <!-- These part ideally should be a form element,
+    but I wrote this code a year ago and I don't want to break anything...-->
+    {#<section id="chat_box">#}
+
+        <p class="text">Message: </p>
+{# <input id="receiver" placeholder="username"> #}
+        <input id="message" placeholder="message">
+        <!--new@@@@@@@@@@ -->
+        <button onclick="send()">Send</button>
+        <button onclick="leave()">Leave Room</button>
+        <!-- MDN says its bad practice to use the onclick attribute,
+        but we're using it anyways coz its easy :)-->
+{#<button onclick="join_room()">Chat</button> #}
+    </section>
+
+    <!-- The (message) input box is set to display: none initially,
+    this means the input box is "invisible" initially-->
+
+
+
+    <!-- The online users are displayed here -->
+{#    <section id="online_users">#}
+{#        <h2>Online Users</h2>#}
+{#        <ul id="online_users_list">#}
+{#            #}
+{#            {% for user in online_users %}#}
+{#                <li>{{ user.username }}</li>#}
+{#            {% endfor %}#}
+{#        </ul>#}
+{#    </section>#}
+
+
+    <section>
+        <h1 class="text">Friend List</h1>
+        <ul id="friend_list">
+            {% for user in friend_list %}
+                <li class="list-item">
+                    <p>{{ user }}</p>
+                    <button class="chat_button" onclick="join_room('{{ user }}')">Chat</button>
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section id="add_friend">
+        <input id="add_friend_username" placeholder="Add friend">
+        <button onclick="add_friend()">Add</button>
+    </section>
+
+    <section id="applying_list">
+        <h1 class="text">Applying list: </h1>
+        <ul id="applying_list_ul">
+            {% for user in applying_list %}
+                <li class="list-item">
+                    <p class="applying_username">{{ user.username }}</p>
+                    {% if user.status %}
+                        <p style="color: red" class="passed_p">passed</p>
+                    {% else %}
+                        <p style="color: gray" class="not_passed_p">not passed</p>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section id="applied_list">
+        <h1 class="text">Applied list: </h1>
+        <ul id="applied_list_ul">
+            {% for user in applied_list %}
+                <li class="list-item">
+                    <p class="applied_username">{{ user.username }}</p>
+                    {% if user.status %}
+                        <button disabled class="accepted_button">Accepted</button>
+                    {% else %}
+                        <button onclick="accept('{{ user.username }}')" class="accept_button">Accept</button>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+
+
+
+
+
+</main>
+
+<script src="/static/js/libs/socket.io.min.js"></script>
+<script>
+    let room_id = 0;
+
+
+
+    $(document).ready(() => {
+
+        if (Cookies.get("room_id") !== undefined) {
+            $("#chat_box").hide();
+            $("#input_box").show();
+            // 获取cookie中的房间号
+            room_id = parseInt(Cookies.get("room_id"));
+        }
+
+    })
+    async function logout(){
+        // 获取后端退出登录接口URL
+        let logoutURL = "{{ url_for('logout') }}";
+        let res = await axios.get(logoutURL)
+        window.open(res.data, "_self")
+    }
+
+    // Here's the Socket IO part of the code
+    // things get a bit complicated here so brace yourselves :P
+    let username = "{{ username }}";
+
+    Cookies.set('username', username);
+
+    // initializes the socket
+    const socket = io();
+
+    // an incoming message arrives, we'll add the message to the message box
+    socket.on("incoming", (msg, color="black") => {
+        add_message(msg, color);
+    })
+
+    // we'll send the message to the server by emitting a "send" event
+
+
+
+
+    function send() {
+        let message = $("#message").val();
+        $("#message").val("");
+        let receiver = Cookies.get("receiver")
+        // 向服务器提交一个send事件
+        socket.emit("send", username, message, room_id, receiver);
+    }
+
+
+
+    // we emit a join room event to the server to join a room
+    async function join_room(receiver) {
+        $(".chat_button").hide()
+        let messageURL = "{{ url_for('get_message') }}";
+        $("#message_box").empty()
+        // 调用后端发送消息接口
+        let res = await axios.get(messageURL,{
+            params:{
+                from_user: username,
+                to_user: receiver
+            }
+        })
+        // 如果历史消息记录不为空，则将消息
+        if(res.data.message_list.length > 0){
+            let messageList = res.data.message_list
+            for(let i = 0;i< messageList.length;i++){
+                add_message(messageList[i].from_user + ":" + messageList[i].content, "black")
+            }
+        }
+        Cookies.set("receiver",receiver)
+ {#let receiver = $("#receiver").val(); #}
+
+        // pass in the receiver of our message to the server
+        // as well as the current user's username
+        socket.emit("join", username, receiver, (res) => {
+            // res is a string with the error message if the error occurs
+            // this is a pretty bad way of doing error handling, but watevs
+            if (typeof res != "number") {
+                alert(res);
+                return;
+            }
+
+            // set the room id variable to the room id returned by the server
+            room_id = res;
+            Cookies.set("room_id", room_id);
+
+            // now we'll show the input box, so the user can input their message
+            $("#chat_box").hide();
+            $("#input_box").show();
+        });
+
+    }
+
+    // function when the user clicks on "Leave Room"
+    // emits a "leave" event, telling the server that we want to leave the room
+    function leave() {
+        Cookies.remove("room_id");
+        Cookies.remove("receiver")
+        socket.emit("leave", username, room_id);
+        $("#input_box").hide();
+        $("#chat_box").show();
+        $(".chat_button").show()
+    }
+
+    // function to add a message to the message box
+    // called when an incoming message has reached a client
+    function add_message(message, color) {
+        let box = $("#message_box");
+        let child = $(`<p style="color:${color}; margin: 0px;"></p>`).text(message);
+        box.append(child);
+    }
+
+    async function add_friend(){
+        //获取用户输入的申请好友的用户名
+        let to_user = $("#add_friend_username").val();
+        //清空好友申请输入框
+        $("#add_friend_username").val("");
+
+        // 调用后端发送消息接口
+        let res = await axios.get("{{ url_for('is_applied') }}",{
+            params:{
+                from_user: username,
+                to_user: to_user
+            }
+        })
+        // 如果没有申请过 if application failed
+        if(!res.data.is_applied){
+            //发送一个socket消息
+            socket.emit("add_friend", username, to_user);
+            //新增申请列表内容
+            let box = $("#applying_list_ul");
+            let p1 = $("<p style='display: inline-block'></p>").text(to_user)
+            let p2 = $("<p style='display: inline-block;color: gray;margin-left: 50px' class='not_passed_p'>not passed</p>")
+            let p3 = $("<p style='display: inline-block;color: gray;margin-left: 50px' class='passed_p'>passed</p>")
+            p3.hide()
+            let li = $("<li></li>")
+            li.append(p1)
+            li.append(p2)
+            li.append(p3)
+            box.append(li)
+        }else {
+            alert("You have already applied this user!")
+        }
+    }
+
+    socket.on('new_add', function(data) {
+        // 如果当前用户不是要添加的用户，即要添加的用户才执行此方法
+        if(username !== data){
+            let box = $("#applied_list_ul");
+            let p1 = $("<p style='display: inline-block' class='applied_username'></p>").text(data)
+            let li = $("<li></li>")
+            let accept_button = $(`<button onclick="accept('${data}')" class='accept_button'>Accept</button>`)
+            let accepted_button = $("<button disabled class='accepted_button'>Accepted</button>")
+            accepted_button.hide()
+            li.append(p1)
+            li.append(accept_button)
+            li.append(accepted_button)
+            box.append(li)
+        }
+    });
+
+    async function accept(to_user){
+        // 向服务器发送accept事件
+        socket.emit("accept", username, to_user);
+        let accepted_button = $(`p.applied_username:contains(${to_user})`).siblings('.accepted_button')
+        let accept_button = $(`p.applied_username:contains(${to_user})`).siblings('.accept_button')
+        accept_button.hide()
+        accepted_button.show()
+        let userList = $("#friend_list");
+        if (userList) {
+            let li = $("<li></li>")
+            let p = $("<p></p>").text(to_user)
+            let button = $(`<button class='chat_button' onclick="join_room('${to_user}')"  style="display: inline-block">Chat</button>`)
+            li.append(p)
+            li.append(button)
+            userList.append(li);
+        }
+    }
+
+    socket.on('new_accept', function(data) {
+        // 隐藏not passed文字，显示
+        let not_passed_p = $(`p.applying_username:contains(${data})`).siblings('.not_passed_p')
+        let passed_p = $(`p.applying_username:contains(${data})`).siblings('.passed_p')
+        not_passed_p.hide()
+        passed_p.show()
+        if(username !== data){
+            let userList = $("#friend_list");
+            let li = $("<li></li>")
+            let p = $("<p></p>").text(data)
+            let button = $(`<button class='chat_button' onclick="join_room('${data}')" style="display: inline-block">Chat</button>`)
+            li.append(p)
+            li.append(button)
+            userList.append(li);
+        }
+    });
+</script>
+
+
+{% endblock %}
